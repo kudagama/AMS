@@ -1,0 +1,227 @@
+// Prisma Schema for Enterprise Attendance & Workforce Management System (AMS)
+// Modernized Next-Gen Multi-Agent Workforce Management System
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  AGENT
+  TEAM_LEADER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ShiftStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  SWAP_PENDING
+  CANCELLED
+}
+
+enum ShiftType {
+  MORNING      // 06:00 - 15:00
+  AFTERNOON    // 14:00 - 23:00
+  NIGHT        // 22:00 - 07:00
+  SPLIT        // Flexible / split schedule
+  OVERTIME     // Dedicated extra capacity
+  OFF_DAY      // Scheduled Rest Day
+  ON_CALL      // Emergency standby
+  TRAINING     // Dedicated development / workshop
+}
+
+enum LocationType {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+enum UserShiftStatus {
+  ON_SHIFT
+  ON_BREAK
+  OFF_SHIFT
+  EXCUSED
+}
+
+enum SwapStatus {
+  PENDING_PEER      // Awaiting peer confirmation
+  PEER_ACCEPTED     // Peer accepted; pending Team Leader approval
+  APPROVED_BY_TL    // Officially approved by TL; roster updated
+  REJECTED          // Rejected by peer or TL
+  CANCELLED         // Cancelled by requester
+}
+
+enum ExcuseCategory {
+  SYSTEM_FAILURE
+  LEARNING_TRAINING
+  MEETINGS
+  MISCELLANEOUS
+  HEALTH_EMERGENCY
+}
+
+enum ExcuseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_INFO
+}
+
+model User {
+  id                 String          @id @default(uuid()) @db.Uuid
+  agentId            String          @unique @db.VarChar(32) // e.g., "AGT-8042"
+  name               String          @db.VarChar(128)
+  email              String          @unique @db.VarChar(255)
+  passwordHash       String?         @db.VarChar(255) // Optional if SSO/OAuth is used
+  avatarUrl          String?
+  role               Role            @default(AGENT)
+  department         String          @db.VarChar(100) // e.g., "Tier 2 Technical Support"
+  shiftGroup         String          @db.VarChar(100) // e.g., "Alpha APAC Squad"
+  isActive           Boolean         @default(true)
+  currentShiftStatus UserShiftStatus @default(OFF_SHIFT)
+
+  // Relationships
+  shifts             Shift[]         @relation("UserShifts")
+  requestedSwaps     ShiftSwap[]     @relation("RequesterSwaps")
+  receivedSwaps      ShiftSwap[]     @relation("TargetPeerSwaps")
+  approvedSwaps      ShiftSwap[]     @relation("TLApproverSwaps")
+  excuseLogs         ExcuseLog[]     @relation("UserExcuses")
+  reviewedExcuses    ExcuseLog[]     @relation("TLReviewedExcuses")
+  auditLogs          AuditLog[]      @relation("UserAuditLogs")
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([agentId])
+  @@index([role])
+  @@index([department])
+  @@map("users")
+}
+
+model Shift {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @db.Uuid
+  user             User         @relation("UserShifts", fields: [userId], references: [id], onDelete: Cascade)
+  
+  shiftDate        DateTime     @db.Date
+  startTime        DateTime     @db.Timestamptz(6)
+  endTime          DateTime     @db.Timestamptz(6)
+  type             ShiftType    @default(MORNING)
+  status           ShiftStatus  @default(SCHEDULED)
+  location         LocationType @default(ON_SITE)
+  notes            String?      @db.Text
+  allowSwap        Boolean      @default(true)
+
+  // Swaps involving this shift
+  swapsAsRequester ShiftSwap[]  @relation("RequesterShift")
+  swapsAsTarget    ShiftSwap[]  @relation("TargetShift")
+  excuseLogs       ExcuseLog[]  @relation("ShiftExcuses")
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([userId, shiftDate, startTime])
+  @@index([userId, shiftDate])
+  @@index([shiftDate, type])
+  @@map("shifts")
+}
+
+model ShiftSwap {
+  id                   String      @id @default(uuid()) @db.Uuid
+  
+  // Requester
+  requesterId          String      @db.Uuid
+  requester            User        @relation("RequesterSwaps", fields: [requesterId], references: [id], onDelete: Cascade)
+  requesterShiftId     String      @db.Uuid
+  requesterShift       Shift       @relation("RequesterShift", fields: [requesterShiftId], references: [id], onDelete: Cascade)
+  
+  // Target Peer
+  targetPeerId         String      @db.Uuid
+  targetPeer           User        @relation("TargetPeerSwaps", fields: [targetPeerId], references: [id], onDelete: Cascade)
+  targetShiftId        String      @db.Uuid
+  targetShift          Shift       @relation("TargetShift", fields: [targetShiftId], references: [id], onDelete: Cascade)
+
+  // Status & Approval Engine
+  status               SwapStatus  @default(PENDING_PEER)
+  swapReason           String      @db.Text
+  peerResponseNotes    String?     @db.Text
+  peerRespondedAt      DateTime?   @db.Timestamptz(6)
+  
+  // Team Leader Review (Stage 2)
+  tlApproverId         String?     @db.Uuid
+  tlApprover           User?       @relation("TLApproverSwaps", fields: [tlApproverId], references: [id])
+  tlNotes              String?     @db.Text
+  tlReviewedAt         DateTime?   @db.Timestamptz(6)
+
+  // Automated Conflict-Check Audit
+  conflictCheckPassed  Boolean     @default(true)
+  conflictDetails      Json?       // Stores rule validations: { restPeriodOk: true, noOverlap: true, maxWeeklyHoursOk: true }
+
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@index([requesterId, status])
+  @@index([targetPeerId, status])
+  @@index([status])
+  @@map("shift_swaps")
+}
+
+model ExcuseLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  user            User           @relation("UserExcuses", fields: [userId], references: [id], onDelete: Cascade)
+  
+  shiftId         String?        @db.Uuid
+  shift           Shift?         @relation("ShiftExcuses", fields: [shiftId], references: [id], onDelete: SetNull)
+
+  category        ExcuseCategory
+  subCategory     String         @db.VarChar(128) // e.g., "PC Slow / Freezing", "IVR Telephony Drop"
+  fromTime        DateTime       @db.Timestamptz(6)
+  toTime          DateTime       @db.Timestamptz(6)
+  durationMinutes Int            // Computed automatically: (toTime - fromTime) in mins
+  reason          String         @db.Text
+  ticketNumber    String?        @db.VarChar(64)  // e.g., "INC-10948"
+  attachmentUrl   String?        @db.VarChar(512) // Cloud storage or local asset reference
+  attachmentName  String?        @db.VarChar(255)
+
+  // Approval Pipeline
+  status          ExcuseStatus   @default(PENDING)
+  tlApproverId    String?        @db.Uuid
+  tlApprover      User?          @relation("TLReviewedExcuses", fields: [tlApproverId], references: [id])
+  tlFeedback      String?        @db.Text
+  reviewedAt      DateTime?      @db.Timestamptz(6)
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([userId, status])
+  @@index([category, status])
+  @@index([fromTime, toTime])
+  @@map("excuse_logs")
+}
+
+model AuditLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  actorId     String?   @db.Uuid
+  actor       User?     @relation("UserAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  
+  action      String    @db.VarChar(100) // e.g., "SWAP_REQUESTED", "PEER_ACCEPTED", "TL_APPROVED", "EXCUSE_LOGGED"
+  entity      String    @db.VarChar(64)  // e.g., "ShiftSwap", "ExcuseLog", "Shift"
+  entityId    String    @db.VarChar(64)
+  details     Json                       // Structured snapshot of changes / payload
+  ipAddress   String?   @db.VarChar(45)  // Supports IPv6 & IPv4
+  userAgent   String?   @db.VarChar(255)
+
+  createdAt   DateTime  @default(now())
+
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
