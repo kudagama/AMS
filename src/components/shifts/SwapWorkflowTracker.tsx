@@ -38,11 +38,15 @@ export function SwapWorkflowTracker({
 
   // Tab 1: Available Swaps / Incoming requests for this agent
   const availableSwaps = swaps.filter(
-    (s) => s.targetPeerId === currentUser.id || (s.status === 'PENDING_PEER' && s.requesterId !== currentUser.id)
+    (s) => s.targetPeerId === currentUser.id || (!s.targetPeerId && s.status === 'PENDING_PEER' && s.requesterId !== currentUser.id)
   );
 
   // Tab 2: My requests sent out by this agent
   const myRequests = swaps.filter((s) => s.requesterId === currentUser.id);
+
+  const pendingActionCount = availableSwaps.filter(
+    (s) => s.status === 'PENDING_PEER' && (s.targetPeerId === currentUser.id || !s.targetPeerId)
+  ).length;
 
   const handleAccept = (swap: ShiftSwap) => {
     onUpdateSwapStatus(swap.id, 'PEER_ACCEPTED', 'Accepted by colleague.', currentUser.id);
@@ -89,7 +93,7 @@ export function SwapWorkflowTracker({
         return (
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            Waiting for Colleague
+            Waiting for Response
           </span>
         );
     }
@@ -109,9 +113,11 @@ export function SwapWorkflowTracker({
         >
           <Inbox className="w-4 h-4" />
           <span>Available Swaps & Incoming</span>
-          {availableSwaps.filter((s) => s.status === 'PENDING_PEER').length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-white text-blue-600 text-[10px] font-black">
-              {availableSwaps.filter((s) => s.status === 'PENDING_PEER').length}
+          {pendingActionCount > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+              activeTab === 'available' ? 'bg-white text-blue-600' : 'bg-emerald-600 text-white animate-pulse'
+            }`}>
+              {pendingActionCount}
             </span>
           )}
         </button>
@@ -145,62 +151,127 @@ export function SwapWorkflowTracker({
             </div>
           ) : (
             availableSwaps.map((swap) => {
-              const isActionable = swap.status === 'PENDING_PEER' && swap.targetPeerId === currentUser.id;
+              const isActionable = swap.status === 'PENDING_PEER' && (swap.targetPeerId === currentUser.id || !swap.targetPeerId);
 
               return (
                 <div
                   key={swap.id}
-                  className="p-5 bg-white rounded-2xl border border-slate-200 shadow-sm hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  className={`p-5 rounded-2xl border transition-all ${
+                    isActionable
+                      ? 'bg-gradient-to-br from-blue-50/50 via-white to-slate-50 border-blue-300 shadow-sm ring-1 ring-blue-500/15'
+                      : 'bg-white border-slate-200 shadow-xs hover:border-slate-300'
+                  }`}
                 >
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center font-bold text-blue-700 shrink-0">
-                      {swap.requesterName.charAt(0)}
-                    </div>
-                    <div className="space-y-1">
+                  {/* Action Banner for Incoming Requests */}
+                  {isActionable && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5 mb-3.5 border-b border-blue-100">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-slate-900">{swap.requesterName}</p>
-                        <span className="text-[11px] text-slate-400 font-medium">• Wants to swap</span>
-                      </div>
-                      
-                      {/* Shift details */}
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 pt-0.5">
-                        <span className="flex items-center gap-1 font-semibold text-slate-800">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                          {swap.requesterShift?.shiftDate || 'Scheduled date'}
-                        </span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1 font-mono font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">
-                          <Clock className="w-3.5 h-3.5" />
-                          {formatRosterShiftTime(swap.requesterShift)}
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-xs font-bold text-blue-900 tracking-wide uppercase">
+                          Action Required • Incoming Shift Trade Request
                         </span>
                       </div>
-
-                      <p className="text-xs text-slate-500 pt-1">
-                        Reason: <span className="text-slate-700 font-medium">&quot;{swap.swapReason}&quot;</span>
-                      </p>
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                        You Can Accept or Decline
+                      </span>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-                    {getStatusPill(swap.status)}
-
-                    {isActionable && (
-                      <div className="flex items-center gap-2 ml-2">
-                        <button
-                          onClick={() => handleAccept(swap)}
-                          className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
-                        >
-                          <Check className="w-4 h-4" />
-                          <span>Accept</span>
-                        </button>
-                        <button
-                          onClick={() => handleDecline(swap)}
-                          className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold transition-all"
-                        >
-                          Decline
-                        </button>
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    {/* Left: Requester & Exchange comparison */}
+                    <div className="space-y-3 flex-1">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center font-bold text-blue-700 shrink-0">
+                          {swap.requesterName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-slate-900">{swap.requesterName}</p>
+                            <span className="text-[11px] font-mono font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {swap.requesterAgentId || 'Agent'} • {swap.requesterGroup || 'CC'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Wants to trade shifts with you
+                          </p>
+                        </div>
                       </div>
-                    )}
+
+                      {/* Shift Trade Comparison Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        {/* What they offer you */}
+                        <div className="p-3 rounded-xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                              Offered to You
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500">
+                              {swap.requesterShift?.type || 'Duty Shift'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-700 font-semibold pt-0.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>{swap.requesterShift?.shiftDate}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-blue-700">
+                            <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                            <span>{formatRosterShiftTime(swap.requesterShift)}</span>
+                          </div>
+                        </div>
+
+                        {/* What they request in return */}
+                        <div className="p-3 rounded-xl bg-white border border-slate-200/90 shadow-2xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
+                              Your Shift Requested
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500">
+                              {swap.targetShift?.type || 'Duty Shift'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-700 font-semibold pt-0.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>{swap.targetShift?.shiftDate || swap.requesterShift?.shiftDate}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-800">
+                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>{formatRosterShiftTime(swap.targetShift)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Reason */}
+                      <div className="text-xs text-slate-600 bg-slate-50/80 rounded-xl p-2.5 border border-slate-100 flex items-start gap-2">
+                        <span className="text-slate-400 font-bold shrink-0">Reason:</span>
+                        <span className="text-slate-700 font-medium italic">&quot;{swap.swapReason}&quot;</span>
+                      </div>
+                    </div>
+
+                    {/* Right: Status Pill & Action Buttons */}
+                    <div className="flex flex-col sm:flex-row lg:flex-col items-end justify-between gap-3 shrink-0 pt-2 lg:pt-0">
+                      <div>
+                        {getStatusPill(swap.status)}
+                      </div>
+
+                      {isActionable && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleAccept(swap)}
+                            className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Accept Swap</span>
+                          </button>
+                          <button
+                            onClick={() => handleDecline(swap)}
+                            className="py-2.5 px-3.5 rounded-xl border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-600 text-xs font-bold transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                          >
+                            <X className="w-4 h-4" />
+                            <span>Decline</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

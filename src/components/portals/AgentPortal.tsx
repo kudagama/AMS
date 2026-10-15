@@ -85,13 +85,13 @@ export function AgentPortal({
 
   // Filter agent data
   const mySwaps = swaps.filter(
-    (s) => s.requesterId === currentUser.id || s.targetPeerId === currentUser.id
+    (s) => s.requesterId === currentUser.id || s.targetPeerId === currentUser.id || (!s.targetPeerId && s.status === 'PENDING_PEER')
   );
   const myExcuses = excuses.filter((e) => e.userId === currentUser.id);
 
-  // Incoming action items
+  // Incoming action items for this agent to review/accept
   const incomingRequests = mySwaps.filter(
-    (s) => s.targetPeerId === currentUser.id && s.status === 'PENDING_PEER'
+    (s) => (s.targetPeerId === currentUser.id || !s.targetPeerId) && s.status === 'PENDING_PEER' && s.requesterId !== currentUser.id
   );
   const unreadCount = notifications.filter((n) => !n.read).length;
 
